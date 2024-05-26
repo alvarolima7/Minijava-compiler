@@ -1,0 +1,380 @@
+PARSER_BEGIN(Parser)
+package minijavac.LexerParser;
+import minijavac.SyntaxTree.*;
+import minijavac.SyntaxTree.classes.*;
+import minijavac.SyntaxTree.expression.*;
+import minijavac.SyntaxTree.statement.*;
+import minijavac.SyntaxTree.type.*;
+import java.util.ArrayList;
+public class Parser {}
+PARSER_END(Parser)
+
+SKIP : {
+    " " | "\t" | "\n" | "\r" | "\f"
+}
+
+SPECIAL_TOKEN : {
+    <SINGLE_LINE_COMMENT: "//" (~["\n","\r"])* ("\n"|"\r"|"\r\n")>
+    | <FORMAL_COMMENT: "/**" (~["*"])* "*" ("*" | (~["*","/"] (~["*"])* "*"))* "/">
+    | <MULTI_LINE_COMMENT: "/*" (~["*"])* "*" ("*" | (~["*","/"] (~["*"])* "*"))* "/">
+}
+
+TOKEN : {
+    <IF : "if">
+    | <ELSE : "else">
+    | <WHILE : "while">
+    | <RETURN : "return">
+    | <CLASS : "class">
+    | <PUBLIC : "public">
+    | <STATIC : "static">
+    | <VOID : "void">
+    | <MAIN : "main">
+    | <LPAREN : "(">
+    | <RPAREN : ")">
+    | <LBRACE : "{">
+    | <RBRACE : "}">
+    | <LBRACKET : "[">
+    | <RBRACKET : "]">
+    | <SEMICOLON : ";">
+    | <COMMA : ",">
+    | <DOT : ".">
+    | <ASSIGN : "=">
+    | <PLUS : "+">
+    | <MINUS : "-">
+    | <TIMES : "*">
+    | <LT : "<">
+    | <AND : "&&">
+    | <NOT : "!">
+    | <NEW : "new">
+    | <STRING: "String">
+    | <INT : "int">
+    | <BOOLEAN : "boolean">
+    | <TRUE : "true">
+    | <FALSE : "false">
+    | <THIS : "this">
+    | <SYSTEM_OUT_PRINTLN : "System.out.println">
+    | <EXTENDS : "extends">
+    | <LENGTH : "length">
+    | <INT_LITERAL: ( ["1"-"9"] (["0"-"9"])* | "0" )>
+    | <IDENTIFIER: <LETTER> (<LETTER> | <DIGIT> | "_")*>
+    | <#DIGIT: ["0" - "9"]>
+    | <#LETTER: ["a" - "z", "A" - "Z"]>
+}
+
+Program Start() :
+{
+    MainClass mainClass;
+    ClassDecl currClass;
+    ArrayList<ClassDecl> classDeclList = new ArrayList<>();
+}
+{
+    mainClass = MainClass() (currClass = ClassDeclaration() { classDeclList.add(currClass);} )* < EOF >
+    { return new Program(mainClass, classDeclList); }
+}
+
+MainClass MainClass() :
+{
+    Token className;
+    Token argsName;
+    Statement body;
+}
+{
+    <CLASS> className = <IDENTIFIER> <LBRACE>
+        <PUBLIC><STATIC><VOID><MAIN><LPAREN><STRING><LBRACKET><RBRACKET> argsName = <IDENTIFIER> <RPAREN><LBRACE>
+            body = Statement()
+        <RBRACE>
+    <RBRACE>
+    { return new MainClass(new Identifier(className.image), new Identifier(argsName.image), body); }
+}
+
+ClassDecl ClassDeclaration() :
+{
+    Token className;
+    ArrayList<VarDecl> varDeclList = new ArrayList<>();
+    ArrayList<MethodDecl> methodDeclList = new ArrayList<>();
+    VarDecl currVar;
+    MethodDecl currMethod;
+    Token superClassName = null;
+}
+{
+   <CLASS> className = <IDENTIFIER> ( <EXTENDS> superClassName = <IDENTIFIER> )? <LBRACE>
+        ( currVar = VarDeclaration() { varDeclList.add(currVar);} )*
+        ( currMethod = MethodDeclaration() { methodDeclList.add(currMethod); } )*
+   <RBRACE>
+   {
+     return superClassName == null ?
+     new ClassDeclSimple(new Identifier(className.image), varDeclList, methodDeclList) :
+     new ClassDeclExtends(new Identifier(className.image), new Identifier(superClassName.image), varDeclList, methodDeclList);
+}
+}
+
+VarDecl VarDeclaration() :
+{
+    Type type;
+    Token typeName;
+}
+{
+    type = Type() typeName = <IDENTIFIER> <SEMICOLON>
+    { return  new VarDecl(type, new Identifier(typeName.image)); }
+}
+
+MethodDecl MethodDeclaration() :
+{
+    Type returnType;
+    Token methodName;
+    ArrayList<Formal> formalList;
+    ArrayList<VarDecl> varDeclList = new ArrayList<>();
+    ArrayList<Statement> statementList = new ArrayList<>();
+    Expression returnExp;
+    Formal currFormal;
+    VarDecl currVar;
+    Statement currStatement;
+}
+{
+    <PUBLIC> returnType = Type() methodName = <IDENTIFIER> <LPAREN> formalList = FormalList() <RPAREN> <LBRACE>
+        (LOOKAHEAD(2) currVar = VarDeclaration() { varDeclList.add(currVar); } )*
+        ( currStatement = Statement() { statementList.add(currStatement); } )*
+        <RETURN> returnExp = Expression() <SEMICOLON>
+    <RBRACE>
+    { return new MethodDecl(returnType, new Identifier(methodName.image), formalList, varDeclList, statementList, returnExp); }
+}
+
+ArrayList<Formal> FormalList() :
+{
+    Type type;
+    Token name;
+    ArrayList<Formal> formalList = new ArrayList<>();
+}
+{
+    (
+        type = Type() name = <IDENTIFIER>
+        { formalList.add(new Formal(type, new Identifier(name.image))); }
+
+        (
+            <COMMA> type = Type() name = <IDENTIFIER>
+            { formalList.add(new Formal(type, new Identifier(name.image))); }
+        )*
+    )?
+    { return formalList; }
+}
+
+Type Type() : {}
+{
+    LOOKAHEAD(2) <INT> <LBRACKET> <RBRACKET>
+    { return new IntArrayType(); }
+
+    | <BOOLEAN>
+    { return new BooleanType(); }
+
+    | <INT>
+    { return new IntegerType(); }
+
+    | { Token identifier; } identifier = <IDENTIFIER>
+    { return new IdentifierType(identifier.image); }
+}
+
+Statement Statement() : {}
+{
+	{ Block block; } block = Block() { return block; }
+	| { IfElse ifElseStatement; } ifElseStatement = IfElse() { return ifElseStatement; }
+	| { While whileStatement; } whileStatement = While() { return whileStatement; }
+	| { Print printStatement; } printStatement = Print() { return printStatement; }
+	| { Token varName; Expression index = null; Expression value; }
+      varName = <IDENTIFIER> (<LBRACKET> index = Expression() <RBRACKET>)? <ASSIGN> value = Expression() <SEMICOLON>
+      {
+          return index == null ?
+          new Assign(new Identifier(varName.image), value) :
+          new ArrayAssign(new Identifier(varName.image), index, value);
+      }
+}
+
+Block Block() :
+{
+    ArrayList<Statement> statementList = new ArrayList<>();
+    Statement currStatement;
+}
+{
+    <LBRACE> ( currStatement = Statement() { statementList.add(currStatement); } )* <RBRACE>
+    { return new Block(statementList); }
+}
+
+IfElse IfElse() :
+{
+    Expression ifCondition;
+    Statement thenStatement;
+    Statement elseStatement;
+}
+{
+    <IF> <LPAREN> ifCondition = Expression() <RPAREN>
+        thenStatement = Statement()
+    <ELSE>
+        elseStatement = Statement()
+    { return new IfElse(ifCondition, thenStatement, elseStatement); }
+}
+
+While While() :
+{
+    Expression whileCondition;
+    Statement body;
+}
+{
+    <WHILE> <LPAREN> whileCondition = Expression() <RPAREN>
+        body = Statement()
+    { return new While(whileCondition, body); }
+}
+
+Print Print() :
+{
+    Expression printExp;
+}
+{
+    <SYSTEM_OUT_PRINTLN> <LPAREN> printExp = Expression() <RPAREN> <SEMICOLON>
+    { return new Print(printExp); }
+}
+
+Expression Expression() :
+{
+    Expression expression;
+    Expression lessThanExp;
+}
+{
+    expression = LessThanExpression()
+    (
+        LOOKAHEAD(2) <AND> lessThanExp = LessThanExpression()
+        { expression = new And(expression, lessThanExp); }
+    )*
+    { return expression; }
+}
+
+Expression LessThanExpression() :
+{
+    Expression expression;
+    Expression lessThanExp;
+}
+{
+    expression = PlusMinusExpression()
+    (
+        LOOKAHEAD(2) <LT> lessThanExp = PlusMinusExpression()
+        { expression = new LessThan(expression, lessThanExp); }
+    )*
+    { return expression; }
+}
+
+Expression PlusMinusExpression() :
+{
+    Expression expression;
+    Expression timesExp;
+}
+{
+    expression = TimesExpression()
+    (
+        LOOKAHEAD(2) <PLUS> timesExp = TimesExpression() { expression = new Plus(expression, timesExp); }
+        |            <MINUS> timesExp = TimesExpression() { expression = new Minus(expression, timesExp); }
+    )*
+    { return expression; }
+}
+
+Expression TimesExpression() :
+{
+    Expression expression;
+    Expression notExp;
+}
+{
+    expression = NotExpression()
+    (
+        LOOKAHEAD(2) <TIMES> notExp = NotExpression()
+        { expression = new Times(expression, notExp); }
+    )*
+    { return expression; }
+}
+
+Expression NotExpression() :
+{
+    Expression expression;
+}
+{
+    LOOKAHEAD(2) <NOT> expression = NotExpression() { return new Not(expression); }
+    |                  expression = Dot()
+    { return expression; }
+}
+
+Expression Dot() :
+{
+    Expression expression;
+    Expression rightHandSide;
+}
+{
+	expression = Array()
+	(
+	    LOOKAHEAD(2) <DOT> <LENGTH> { return new ArrayLength(expression); }
+	    |LOOKAHEAD(2) <DOT> rightHandSide = MethodCall(expression)
+	    { expression = rightHandSide; }
+    )*
+    { return expression; }
+}
+
+Expression MethodCall(Expression expression) :
+{
+    Token methodName;
+    ArrayList<Expression> expList;
+}
+{
+    methodName = <IDENTIFIER> <LPAREN> expList = ExpList() <RPAREN>
+    { return new MethodCall(expression, new Identifier(methodName.image), expList); }
+}
+
+ArrayList<Expression> ExpList():
+{
+    ArrayList<Expression> expList = new ArrayList<>();
+    Expression currExp;
+}
+{
+    (
+        currExp = Expression() { expList.add(currExp); }
+	    (
+	        <COMMA> currExp = Expression() { expList.add(currExp); }
+	    )*
+    )?
+    { return expList; }
+}
+
+Expression Array() :
+{
+    Expression expression;
+    Expression index = null;
+}
+{
+    expression = Terminal()
+    (
+        LOOKAHEAD(1) <LBRACKET> index = Expression() <RBRACKET>
+    )?
+    { return index == null ? expression : new ArrayLookup(expression, index); }
+}
+
+Expression Terminal() :
+{
+    Expression expression;
+    Token identifier;
+}
+{
+    <LPAREN> expression = Expression() <RPAREN> { return expression; }
+    | identifier = <IDENTIFIER> { return new IdentifierExp(identifier.image); }
+    | identifier = <INT_LITERAL> { return new IntegerLiteral(Integer.parseInt(identifier.image)); }
+    | <TRUE> { return new True(); }
+    | <FALSE> { return new False(); }
+    | <THIS> { return new This(); }
+    | <NEW> expression = New() { return expression; }
+}
+
+Expression New() :
+{
+    Token identifier;
+    Expression expression;
+}
+{
+    <INT> <LBRACKET> expression = Expression() <RBRACKET>
+    { return new NewArray(expression); }
+
+    | identifier = <IDENTIFIER> <LPAREN> <RPAREN>
+    { return new NewObject(new Identifier(identifier.image)); }
+}
